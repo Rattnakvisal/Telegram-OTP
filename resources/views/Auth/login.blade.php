@@ -8,14 +8,17 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 
-<body class="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-    <div class="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
-        <h1 class="text-2xl font-semibold text-gray-900">Sign in</h1>
-        <p class="text-sm text-gray-500 mt-1">Login with phone/password. Telegram OTP is required to complete sign in.</p>
-        <p class="text-xs text-gray-400 mt-1">Use Cambodia format like 012345678 or +85512345678. If OTP fails, send /link +855xxxxxxxx in your bot chat first.</p>
+<body class="auth-body flex items-center justify-center p-4">
+    <div class="auth-orb auth-orb-top"></div>
+    <div class="auth-orb auth-orb-bottom"></div>
+
+    <div class="w-full max-w-md auth-card animate-pop-in">
+        <h1 class="text-2xl font-semibold text-slate-900">Sign in</h1>
+        <p class="text-sm text-slate-600 mt-1">Login with phone/password for your admin, staff, or user account.</p>
+        <p class="text-xs text-slate-500 mt-1">Use Cambodia format: 012345678 or +85512345678.</p>
 
         @if (session('status'))
-            <div class="mt-4 rounded-lg border border-green-200 bg-green-50 text-green-700 px-4 py-3 text-sm">
+            <div class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-4 py-3 text-sm">
                 {{ session('status') }}
             </div>
         @endif
@@ -30,46 +33,41 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ route('login.store') }}" class="mt-6 space-y-4">
+        <form method="POST" action="{{ route('login.store') }}" class="mt-6 space-y-4 stagger-group">
             @csrf
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1" for="phone_number">Phone number</label>
+            <div class="stagger-item">
+                <label class="block text-sm font-medium text-slate-700 mb-1" for="phone_number">Phone number</label>
                 <input id="phone_number" name="phone_number" type="text" value="{{ old('phone_number') }}" required autofocus
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="012345678 or +85512345678">
+                    class="auth-input" placeholder="012345678 or +85512345678">
             </div>
 
-            <div>
+            <div class="stagger-item">
                 <div class="flex items-center justify-between mb-1">
-                    <label class="block text-sm font-medium text-gray-700" for="password">Password</label>
-                    <a href="{{ route('password.request') }}" class="text-xs text-blue-600 font-medium hover:underline">Forgot password?</a>
+                    <label class="block text-sm font-medium text-slate-700" for="password">Password</label>
+                    <a href="{{ route('password.request') }}" class="text-xs text-sky-700 font-medium hover:underline">Forgot password?</a>
                 </div>
-                <input id="password" name="password" type="password" required
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input id="password" name="password" type="password" required class="auth-input">
             </div>
 
-            <label class="flex items-center gap-2 text-sm text-gray-600">
-                <input type="checkbox" name="remember" value="1" class="rounded border-gray-300">
+            <label class="stagger-item flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" name="remember" value="1" class="rounded border-slate-300">
                 <span>Remember me</span>
             </label>
 
-            <button type="submit"
-                class="w-full rounded-lg bg-gray-900 text-white py-2.5 text-sm font-medium hover:bg-gray-800 transition">
-                Login
-            </button>
+            <button type="submit" class="stagger-item w-full btn-primary">Login</button>
         </form>
 
         <div class="relative my-6">
             <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-gray-200"></div>
+                <div class="w-full border-t border-slate-200"></div>
             </div>
-            <div class="relative text-center text-xs uppercase text-gray-400">
+            <div class="relative text-center text-xs uppercase text-slate-400">
                 <span class="bg-white px-2">or</span>
             </div>
         </div>
 
         <a href="{{ route('auth.google.redirect') }}"
-            class="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+            class="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
             <svg class="h-5 w-5" viewBox="0 0 48 48" aria-hidden="true">
                 <path fill="#FFC107"
                     d="M43.611 20.083H42V20H24v8h11.303C33.648 32.659 29.215 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
@@ -83,12 +81,11 @@
             Continue with Google
         </a>
 
-        <p class="mt-6 text-sm text-center text-gray-600">
+        <p class="mt-6 text-sm text-center text-slate-600">
             No account yet?
-            <a href="{{ route('register') }}" class="text-blue-600 font-medium hover:underline">Create one</a>
+            <a href="{{ route('register') }}" class="text-sky-700 font-medium hover:underline">Create one</a>
         </p>
     </div>
 </body>
 
 </html>
-

@@ -101,6 +101,7 @@ class AuthController extends Controller
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'phone_number' => $phoneNumber,
+                'role' => 'user',
                 'password' => Hash::make($validated['password']),
             ],
             inputFields: ['name', 'email', 'phone_number']
@@ -351,7 +352,7 @@ class AuthController extends Controller
         Auth::login($user, $pendingOtp['payload']['remember'] ?? false);
         $request->session()->regenerate();
 
-        return redirect()->route('dashboard');
+        return redirect()->route($this->roleDashboardRoute($user));
     }
 
     private function completePasswordReset(array $pendingOtp): RedirectResponse
@@ -435,5 +436,14 @@ class AuthController extends Controller
         }
 
         return (bool) preg_match('/^\+\d{8,15}$/', $phoneNumber);
+    }
+
+    private function roleDashboardRoute(User $user): string
+    {
+        return match ($user->role) {
+            'admin' => 'dashboard.admin',
+            'staff' => 'dashboard.staff',
+            default => 'dashboard.user',
+        };
     }
 }

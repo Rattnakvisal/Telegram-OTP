@@ -21,6 +21,7 @@ class User extends Authenticatable
         'name',
         'email',
         'phone_number',
+        'role',
         'password',
         'telegram_chat_id',
         'google_id',

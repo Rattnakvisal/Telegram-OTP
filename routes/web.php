@@ -7,7 +7,11 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     if (Auth::check()) {
-        return redirect()->route('dashboard');
+        return redirect()->route(match (Auth::user()?->role) {
+            'admin' => 'dashboard.admin',
+            'staff' => 'dashboard.staff',
+            default => 'dashboard.user',
+        });
     }
 
     return view('Auth.login');
@@ -31,6 +35,25 @@ Route::middleware('guest')->group(function (): void {
 });
 
 Route::middleware('auth')->group(function (): void {
-    Route::view('/dashboard', 'welcome')->name('dashboard');
+    Route::get('/dashboard', function () {
+        return redirect()->route(match (Auth::user()?->role) {
+            'admin' => 'dashboard.admin',
+            'staff' => 'dashboard.staff',
+            default => 'dashboard.user',
+        });
+    })->name('dashboard');
+
+    Route::view('/admin/dashboard', 'Dashboard.admin')
+        ->middleware('role:admin')
+        ->name('dashboard.admin');
+
+    Route::view('/staff/dashboard', 'Dashboard.staff')
+        ->middleware('role:staff')
+        ->name('dashboard.staff');
+
+    Route::view('/user/dashboard', 'Dashboard.user')
+        ->middleware('role:user')
+        ->name('dashboard.user');
+
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });

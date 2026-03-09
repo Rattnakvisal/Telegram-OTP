@@ -8,13 +8,16 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 
-<body class="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-    <div class="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
-        <h1 class="text-2xl font-semibold text-gray-900">Reset password</h1>
-        <p class="text-sm text-gray-500 mt-1">Enter your email and new password. OTP will be sent to Telegram linked with your account phone number (send /link +855xxxxxxxx in bot if not linked yet).</p>
+<body class="auth-body flex items-center justify-center p-4">
+    <div class="auth-orb auth-orb-top"></div>
+    <div class="auth-orb auth-orb-bottom"></div>
+
+    <div class="w-full max-w-md auth-card animate-pop-in">
+        <h1 class="text-2xl font-semibold text-slate-900">Reset password</h1>
+        <p class="text-sm text-slate-600 mt-1">Enter your email and new password. OTP will be sent to your linked Telegram account.</p>
 
         @if (session('status'))
-            <div class="mt-4 rounded-lg border border-green-200 bg-green-50 text-green-700 px-4 py-3 text-sm">
+            <div class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-4 py-3 text-sm">
                 {{ session('status') }}
             </div>
         @endif
@@ -29,38 +32,31 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ route('password.email') }}" class="mt-6 space-y-4">
+        <form method="POST" action="{{ route('password.email') }}" class="mt-6 space-y-4 stagger-group">
             @csrf
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1" for="email">Email</label>
-                <input id="email" name="email" type="email" value="{{ old('email') }}" required autofocus
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <div class="stagger-item">
+                <label class="block text-sm font-medium text-slate-700 mb-1" for="email">Email</label>
+                <input id="email" name="email" type="email" value="{{ old('email') }}" required autofocus class="auth-input">
             </div>
 
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1" for="password">New password</label>
-                <input id="password" name="password" type="password" required
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <div class="stagger-item">
+                <label class="block text-sm font-medium text-slate-700 mb-1" for="password">New password</label>
+                <input id="password" name="password" type="password" required class="auth-input">
             </div>
 
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1" for="password_confirmation">Confirm new password</label>
-                <input id="password_confirmation" name="password_confirmation" type="password" required
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <div class="stagger-item">
+                <label class="block text-sm font-medium text-slate-700 mb-1" for="password_confirmation">Confirm new password</label>
+                <input id="password_confirmation" name="password_confirmation" type="password" required class="auth-input">
             </div>
 
-            <button type="submit"
-                class="w-full rounded-lg bg-gray-900 text-white py-2.5 text-sm font-medium hover:bg-gray-800 transition">
-                Send OTP
-            </button>
+            <button type="submit" class="stagger-item w-full btn-primary">Send OTP</button>
         </form>
 
-        <p class="mt-6 text-sm text-center text-gray-600">
+        <p class="mt-6 text-sm text-center text-slate-600">
             Back to
-            <a href="{{ route('login') }}" class="text-blue-600 font-medium hover:underline">Login</a>
+            <a href="{{ route('login') }}" class="text-sky-700 font-medium hover:underline">Login</a>
         </p>
     </div>
 </body>
 
 </html>
-
