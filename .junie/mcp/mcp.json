@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "C:\\php-8.4.17\\php.exe",
+            "args": [
+                "C:\\Users\\Chun Rattnakvisal\\Downloads\\Laravel\\Telegram-OTP\\artisan",
+                "boost:mcp"
+            ]
+        }
+    }
+}
