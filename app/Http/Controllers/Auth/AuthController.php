@@ -229,10 +229,11 @@ class AuthController extends Controller
                 'intent' => $pendingOtp['intent'] ?? null,
             ]);
 
-            $botLink = $this->telegramOtpService->botLink();
+            $phoneForLink = $pendingOtp['phone_number'] ?? $pendingOtp['account_identifier'] ?? null;
+            $botLink = $this->telegramOtpService->startLinkUrl($phoneForLink);
             $botHint = $botLink
-                ? "Open {$botLink}, press /start, then send contact or message '/link {$pendingOtp['account_identifier']}'."
-                : "Open your bot chat, press /start, then send contact or message '/link {$pendingOtp['account_identifier']}'.";
+                ? "Open {$botLink}, press START, or send '/link {$pendingOtp['account_identifier']}'."
+                : "Open your bot chat, press /start, then send '/link {$pendingOtp['account_identifier']}'.";
 
             return back()->withErrors([
                 'otp' => "Failed to send OTP. {$botHint}",
@@ -284,10 +285,10 @@ class AuthController extends Controller
                 'intent' => $intent,
             ]);
 
-            $botLink = $this->telegramOtpService->botLink();
+            $botLink = $this->telegramOtpService->startLinkUrl($phoneNumber ?? $accountIdentifier);
             $botHint = $botLink
-                ? "Open {$botLink}, press /start, then send contact or message '/link {$accountIdentifier}'."
-                : "Open your bot chat, press /start, then send contact or message '/link {$accountIdentifier}'.";
+                ? "Open {$botLink}, press START, or send '/link {$accountIdentifier}'."
+                : "Open your bot chat, press /start, then send '/link {$accountIdentifier}'.";
 
             return back()
                 ->withErrors([

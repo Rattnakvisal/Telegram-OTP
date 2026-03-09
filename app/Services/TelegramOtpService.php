@@ -2,7 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\TelegramContact;
+use App\Models\User;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class TelegramOtpService
@@ -21,20 +24,22 @@ class TelegramOtpService
         }
 
         if ($phoneNumber !== null && $phoneNumber !== '') {
-            $chatId = $this->findChatIdByPhone($phoneNumber);
+            $chatId = $this->findLinkedChatIdByPhone($phoneNumber) ?? $this->findChatIdByPhone($phoneNumber);
 
             if ($chatId !== null) {
                 return $chatId;
             }
         }
 
-        $defaultChatId = (string) config('services.telegram.chat_id');
+        if ($this->isTruthy(config('services.telegram.allow_fallback_chat_id', false))) {
+            $defaultChatId = (string) config('services.telegram.chat_id');
 
-        if ($defaultChatId !== '') {
-            return $defaultChatId;
+            if ($defaultChatId !== '') {
+                return $defaultChatId;
+            }
         }
 
-        throw new RuntimeException('Telegram chat not found for this phone number.');
+        throw new RuntimeException('Telegram chat not linked to this phone number. Please open bot and send /start to share contact.');
     }
 
     public function botLink(): ?string
@@ -58,6 +63,49 @@ class TelegramOtpService
         return "https://t.me/{$username}";
     }
 
+    public function startLinkUrl(?string $phoneNumber = null): ?string
+    {
+        $botLink = $this->botLink();
+
+        if ($botLink === null) {
+            return null;
+        }
+
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            return $botLink;
+        }
+
+        $payloadDigits = ltrim($normalizedPhone, '+');
+
+        if ($payloadDigits === '') {
+            return $botLink;
+        }
+
+        return $botLink.'?start=link_'.$payloadDigits;
+    }
+
+    public function sendText(string $chatId, string $text, ?array $replyMarkup = null): void
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $text,
+        ];
+
+        if ($replyMarkup !== null) {
+            $payload['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE);
+        }
+
+        $response = Http::asForm()
+            ->withOptions($this->httpOptions())
+            ->post($this->buildApiUrl('sendMessage'), $payload);
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Telegram API request failed.');
+        }
+    }
+
     public function send(
         string $otp,
         string $intentLabel,
@@ -69,38 +117,33 @@ class TelegramOtpService
             . "Account: {$accountIdentifier}\n"
             . "Expires in {$expiresInMinutes} minutes.";
 
-        $response = Http::asForm()
-            ->withOptions($this->httpOptions())
-            ->post($this->buildApiUrl('sendMessage'), [
-                'chat_id' => $chatId,
-                'text' => $message,
-            ]);
+        $this->sendText($chatId, $message);
+    }
 
-        if (! $response->successful()) {
-            throw new RuntimeException('Telegram API request failed.');
+    public function linkPhoneToChat(string $phoneNumber, string $chatId, ?string $telegramUserId = null): bool
+    {
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            throw new RuntimeException('Phone number is invalid.');
         }
+
+        $this->storeTelegramContact($normalizedPhone, $chatId, $telegramUserId);
+
+        return User::query()
+            ->where('phone_number', $normalizedPhone)
+            ->update(['telegram_chat_id' => $chatId]) > 0;
     }
 
     private function findChatIdByPhone(string $phoneNumber): ?string
     {
-        $normalizedPhone = $this->normalizePhone($phoneNumber);
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
 
         if ($normalizedPhone === null) {
             return null;
         }
 
-        $response = Http::withOptions($this->httpOptions())
-            ->get($this->buildApiUrl('getUpdates'), [
-                'offset' => -100,
-                'limit' => 100,
-                'allowed_updates' => json_encode(['message', 'edited_message']),
-            ]);
-
-        if (! $response->successful()) {
-            return null;
-        }
-
-        $updates = $response->json('result', []);
+        $updates = $this->fetchRecentUpdates();
 
         if (! is_array($updates)) {
             return null;
@@ -135,13 +178,153 @@ class TelegramOtpService
             }
 
             foreach ($candidatePhones as $candidatePhone) {
-                if ($this->normalizePhone($candidatePhone) === $normalizedPhone) {
+                if ($this->normalizePhoneNumber($candidatePhone) === $normalizedPhone) {
+                    $this->storeTelegramContact(
+                        $normalizedPhone,
+                        (string) $chatId,
+                        isset($message['from']['id']) ? (string) $message['from']['id'] : null
+                    );
+
                     return (string) $chatId;
                 }
             }
         }
 
         return null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function fetchRecentUpdates(): array
+    {
+        $response = Http::withOptions($this->httpOptions())
+            ->get($this->buildApiUrl('getUpdates'), [
+                'limit' => 100,
+                'timeout' => 0,
+                'allowed_updates' => json_encode(['message', 'edited_message']),
+            ]);
+
+        if ($response->successful()) {
+            return $this->normalizeUpdatesPayload($response->json('result', []));
+        }
+
+        $description = (string) ($response->json('description') ?? '');
+        $hasWebhookConflict = $response->status() === 409
+            || str_contains(strtolower($description), 'webhook');
+
+        if (! $hasWebhookConflict) {
+            Log::warning('Telegram getUpdates failed.', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            return [];
+        }
+
+        $this->disableWebhookForPolling();
+
+        $retry = Http::withOptions($this->httpOptions())
+            ->get($this->buildApiUrl('getUpdates'), [
+                'limit' => 100,
+                'timeout' => 0,
+                'allowed_updates' => json_encode(['message', 'edited_message']),
+            ]);
+
+        if (! $retry->successful()) {
+            Log::warning('Telegram getUpdates retry failed after webhook disable.', [
+                'status' => $retry->status(),
+                'body' => $retry->body(),
+            ]);
+
+            return [];
+        }
+
+        return $this->normalizeUpdatesPayload($retry->json('result', []));
+    }
+
+    private function disableWebhookForPolling(): void
+    {
+        $response = Http::asForm()
+            ->withOptions($this->httpOptions())
+            ->post($this->buildApiUrl('deleteWebhook'), [
+                'drop_pending_updates' => 'false',
+            ]);
+
+        if (! $response->successful()) {
+            Log::warning('Telegram deleteWebhook failed.', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+        }
+    }
+
+    /**
+     * @param mixed $payload
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeUpdatesPayload(mixed $payload): array
+    {
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $updates = [];
+        foreach ($payload as $item) {
+            if (is_array($item)) {
+                $updates[] = $item;
+            }
+        }
+
+        return $updates;
+    }
+
+    private function findLinkedChatIdByPhone(string $phoneNumber): ?string
+    {
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            return null;
+        }
+
+        try {
+            $chatId = TelegramContact::query()
+                ->where('phone_number', $normalizedPhone)
+                ->value('telegram_chat_id');
+        } catch (\Throwable $exception) {
+            Log::warning('Telegram contact lookup failed.', [
+                'message' => $exception->getMessage(),
+                'phone_number' => $normalizedPhone,
+            ]);
+
+            return null;
+        }
+
+        if (! is_string($chatId) || $chatId === '') {
+            return null;
+        }
+
+        return $chatId;
+    }
+
+    private function storeTelegramContact(string $phoneNumber, string $chatId, ?string $telegramUserId = null): void
+    {
+        try {
+            TelegramContact::query()->updateOrCreate(
+                ['phone_number' => $phoneNumber],
+                [
+                    'telegram_chat_id' => $chatId,
+                    'telegram_user_id' => $telegramUserId,
+                    'last_seen_at' => now(),
+                ]
+            );
+        } catch (\Throwable $exception) {
+            Log::warning('Telegram contact save failed.', [
+                'message' => $exception->getMessage(),
+                'phone_number' => $phoneNumber,
+                'chat_id' => $chatId,
+            ]);
+        }
     }
 
     /**
@@ -201,8 +384,12 @@ class TelegramOtpService
         return $parsed ?? false;
     }
 
-    private function normalizePhone(string $value): ?string
+    public function normalizePhoneNumber(?string $value): ?string
     {
+        if ($value === null) {
+            return null;
+        }
+
         $trimmed = trim($value);
 
         if ($trimmed === '') {

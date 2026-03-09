@@ -47,6 +47,7 @@ return [
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'bot_username' => env('TELEGRAM_BOT_USERNAME'),
         'chat_id' => env('TELEGRAM_CHAT_ID'),
+        'allow_fallback_chat_id' => env('TELEGRAM_ALLOW_FALLBACK_CHAT_ID', false),
         'verify_ssl' => env('TELEGRAM_VERIFY_SSL', true),
     ],
 
