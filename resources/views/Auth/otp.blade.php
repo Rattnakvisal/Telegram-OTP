@@ -14,7 +14,11 @@
 
     <div class="w-full max-w-md auth-card animate-pop-in">
         <h1 class="text-2xl font-semibold text-slate-900">Verify OTP</h1>
-        <p class="text-sm text-slate-600 mt-1">Enter the 6-digit Telegram OTP for {{ $intentLabel }}.</p>
+        @if ($chatLinked)
+            <p class="text-sm text-slate-600 mt-1">Enter the 6-digit Telegram OTP for {{ $intentLabel }}.</p>
+        @else
+            <p class="text-sm text-slate-600 mt-1">Link Telegram first. OTP will be sent after your chat is connected.</p>
+        @endif
         <p class="text-xs text-slate-500 mt-1">Account: {{ $accountIdentifier }}. OTP expires in {{ $expiresInMinutes }} minutes.</p>
 
         @if (session('status'))
@@ -30,6 +34,20 @@
                         <li>{{ $error }}</li>
                     @endforeach
                 </ul>
+            </div>
+        @endif
+
+        @if (! $chatLinked)
+            <div class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 space-y-2">
+                <p>1. Open your Telegram bot chat and press <span class="font-semibold">START</span>.</p>
+                <p>2. Send <span class="font-mono">{{ $linkCommand }}</span> or share your phone number.</p>
+                @if ($botLink)
+                    <a href="{{ $botLink }}" target="_blank" rel="noopener noreferrer"
+                        class="inline-block rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition">
+                        Open Telegram Bot
+                    </a>
+                @endif
+                <p>3. After linking, OTP will be sent automatically. You can also click <span class="font-semibold">Resend OTP</span>.</p>
             </div>
         @endif
 
@@ -57,6 +75,14 @@
             <a href="{{ route('login') }}" class="text-sky-700 font-medium hover:underline">Login</a>
         </p>
     </div>
+
+    @if (! $chatLinked)
+        <script>
+            setTimeout(function() {
+                window.location.reload();
+            }, 8000);
+        </script>
+    @endif
 </body>
 
 </html>

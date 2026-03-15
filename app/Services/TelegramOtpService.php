@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\TelegramContact;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -40,6 +42,15 @@ class TelegramOtpService
         }
 
         throw new RuntimeException('Telegram chat not linked to this phone number. Please open bot and send /start to share contact.');
+    }
+
+    public function linkedChatIdByPhone(?string $phoneNumber): ?string
+    {
+        if ($phoneNumber === null || $phoneNumber === '') {
+            return null;
+        }
+
+        return $this->findLinkedChatIdByPhone($phoneNumber);
     }
 
     public function botLink(): ?string
@@ -102,7 +113,11 @@ class TelegramOtpService
             ->post($this->buildApiUrl('sendMessage'), $payload);
 
         if (! $response->successful()) {
-            throw new RuntimeException('Telegram API request failed.');
+            throw new RuntimeException(sprintf(
+                'Telegram API request failed (status %d): %s',
+                $response->status(),
+                $response->body()
+            ));
         }
     }
 
@@ -120,6 +135,107 @@ class TelegramOtpService
         $this->sendText($chatId, $message);
     }
 
+    public function storePendingOtpForPhone(
+        string $phoneNumber,
+        string $otp,
+        string $intentLabel,
+        string $accountIdentifier,
+        int $expiresInMinutes
+    ): void {
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            return;
+        }
+
+        Cache::put(
+            $this->pendingOtpCacheKey($normalizedPhone),
+            [
+                'otp_encrypted' => Crypt::encryptString($otp),
+                'intent_label' => $intentLabel,
+                'account_identifier' => $accountIdentifier,
+                'expires_in_minutes' => $expiresInMinutes,
+                'expires_at' => now()->addMinutes($expiresInMinutes)->toIso8601String(),
+            ],
+            now()->addMinutes($expiresInMinutes)
+        );
+    }
+
+    public function sendPendingOtpForPhoneIfExists(string $phoneNumber, string $chatId): bool
+    {
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            return false;
+        }
+
+        $cacheKey = $this->pendingOtpCacheKey($normalizedPhone);
+        $pending = Cache::get($cacheKey);
+
+        if (! is_array($pending)) {
+            return false;
+        }
+
+        $intentLabel = (string) ($pending['intent_label'] ?? '');
+        $accountIdentifier = (string) ($pending['account_identifier'] ?? '');
+        $expiresInMinutes = (int) ($pending['expires_in_minutes'] ?? 0);
+        $encryptedOtp = $pending['otp_encrypted'] ?? null;
+        $expiresAt = $pending['expires_at'] ?? null;
+
+        if (
+            ! is_string($encryptedOtp)
+            || $intentLabel === ''
+            || $accountIdentifier === ''
+            || $expiresInMinutes <= 0
+            || ! is_string($expiresAt)
+        ) {
+            Cache::forget($cacheKey);
+
+            return false;
+        }
+
+        try {
+            if (now()->greaterThan($expiresAt)) {
+                Cache::forget($cacheKey);
+
+                return false;
+            }
+
+            $otp = Crypt::decryptString($encryptedOtp);
+
+            $this->send(
+                otp: $otp,
+                intentLabel: $intentLabel,
+                accountIdentifier: $accountIdentifier,
+                expiresInMinutes: $expiresInMinutes,
+                chatId: $chatId
+            );
+
+            Cache::forget($cacheKey);
+
+            return true;
+        } catch (\Throwable $exception) {
+            Log::warning('Pending Telegram OTP send failed.', [
+                'message' => $exception->getMessage(),
+                'phone_number' => $normalizedPhone,
+                'chat_id' => $chatId,
+            ]);
+
+            return false;
+        }
+    }
+
+    public function clearPendingOtpForPhone(?string $phoneNumber): void
+    {
+        $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
+
+        if ($normalizedPhone === null) {
+            return;
+        }
+
+        Cache::forget($this->pendingOtpCacheKey($normalizedPhone));
+    }
+
     public function linkPhoneToChat(string $phoneNumber, string $chatId, ?string $telegramUserId = null): bool
     {
         $normalizedPhone = $this->normalizePhoneNumber($phoneNumber);
@@ -133,6 +249,11 @@ class TelegramOtpService
         return User::query()
             ->where('phone_number', $normalizedPhone)
             ->update(['telegram_chat_id' => $chatId]) > 0;
+    }
+
+    private function pendingOtpCacheKey(string $normalizedPhone): string
+    {
+        return 'telegram_otp:pending:'.md5($normalizedPhone);
     }
 
     private function findChatIdByPhone(string $phoneNumber): ?string
@@ -198,12 +319,20 @@ class TelegramOtpService
      */
     private function fetchRecentUpdates(): array
     {
-        $response = Http::withOptions($this->httpOptions())
-            ->get($this->buildApiUrl('getUpdates'), [
-                'limit' => 100,
-                'timeout' => 0,
-                'allowed_updates' => json_encode(['message', 'edited_message']),
+        try {
+            $response = Http::withOptions($this->httpOptions())
+                ->get($this->buildApiUrl('getUpdates'), [
+                    'limit' => 100,
+                    'timeout' => 0,
+                    'allowed_updates' => json_encode(['message', 'edited_message']),
+                ]);
+        } catch (\Throwable $exception) {
+            Log::warning('Telegram getUpdates connection failed.', [
+                'message' => $exception->getMessage(),
             ]);
+
+            return [];
+        }
 
         if ($response->successful()) {
             return $this->normalizeUpdatesPayload($response->json('result', []));
@@ -213,50 +342,21 @@ class TelegramOtpService
         $hasWebhookConflict = $response->status() === 409
             || str_contains(strtolower($description), 'webhook');
 
-        if (! $hasWebhookConflict) {
-            Log::warning('Telegram getUpdates failed.', [
+        if ($hasWebhookConflict) {
+            Log::info('Telegram getUpdates skipped because webhook is active.', [
                 'status' => $response->status(),
-                'body' => $response->body(),
+                'description' => $description,
             ]);
 
             return [];
         }
 
-        $this->disableWebhookForPolling();
+        Log::warning('Telegram getUpdates failed.', [
+            'status' => $response->status(),
+            'body' => $response->body(),
+        ]);
 
-        $retry = Http::withOptions($this->httpOptions())
-            ->get($this->buildApiUrl('getUpdates'), [
-                'limit' => 100,
-                'timeout' => 0,
-                'allowed_updates' => json_encode(['message', 'edited_message']),
-            ]);
-
-        if (! $retry->successful()) {
-            Log::warning('Telegram getUpdates retry failed after webhook disable.', [
-                'status' => $retry->status(),
-                'body' => $retry->body(),
-            ]);
-
-            return [];
-        }
-
-        return $this->normalizeUpdatesPayload($retry->json('result', []));
-    }
-
-    private function disableWebhookForPolling(): void
-    {
-        $response = Http::asForm()
-            ->withOptions($this->httpOptions())
-            ->post($this->buildApiUrl('deleteWebhook'), [
-                'drop_pending_updates' => 'false',
-            ]);
-
-        if (! $response->successful()) {
-            Log::warning('Telegram deleteWebhook failed.', [
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-        }
+        return [];
     }
 
     /**

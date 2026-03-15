@@ -184,20 +184,33 @@ class TelegramWebhookController extends Controller
             chatId: $chatId,
             telegramUserId: $fromUserId
         );
+        $pendingOtpSent = $this->telegramOtpService->sendPendingOtpForPhoneIfExists($phoneNumber, $chatId);
 
         if ($userExists) {
+            $message = "Connected successfully.\nPhone: {$phoneNumber}\nYou will receive OTP messages in real time in this chat.";
+
+            if ($pendingOtpSent) {
+                $message .= "\n\nA pending OTP was found and has been sent now.";
+            }
+
             $this->telegramOtpService->sendText(
                 chatId: $chatId,
-                text: "Connected successfully.\nPhone: {$phoneNumber}\nYou will receive OTP messages in real time in this chat.",
+                text: $message,
                 replyMarkup: ['remove_keyboard' => true]
             );
 
             return;
         }
 
+        $message = "Phone saved: {$phoneNumber}\nNo account found yet. Register in the app with this number, then OTP will arrive here.";
+
+        if ($pendingOtpSent) {
+            $message = "Phone saved: {$phoneNumber}\nA pending registration OTP has been sent to this chat. Return to the app and verify it.";
+        }
+
         $this->telegramOtpService->sendText(
             chatId: $chatId,
-            text: "Phone saved: {$phoneNumber}\nNo account found yet. Register in the app with this number, then OTP will arrive here.",
+            text: $message,
             replyMarkup: ['remove_keyboard' => true]
         );
     }

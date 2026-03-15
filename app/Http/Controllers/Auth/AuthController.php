@@ -152,10 +152,36 @@ class AuthController extends Controller
                 ->withErrors(['otp' => 'No OTP request found. Please try again.']);
         }
 
+        if (empty($pendingOtp['chat_id']) && ! empty($pendingOtp['phone_number'])) {
+            $linkedChatId = $this->telegramOtpService->linkedChatIdByPhone($pendingOtp['phone_number']);
+
+            if ($linkedChatId === null) {
+                try {
+                    $linkedChatId = $this->telegramOtpService->resolveChatId($pendingOtp['phone_number'], null);
+                } catch (\Throwable) {
+                    $linkedChatId = null;
+                }
+            }
+
+            if ($linkedChatId !== null) {
+                $pendingOtp['chat_id'] = $linkedChatId;
+                $request->session()->put(self::OTP_SESSION_KEY, $pendingOtp);
+
+                if ($this->telegramOtpService->sendPendingOtpForPhoneIfExists($pendingOtp['phone_number'], $linkedChatId)) {
+                    $request->session()->flash('status', 'Telegram linked. Your pending OTP has just been sent.');
+                }
+            }
+        }
+
+        $phoneForLink = $pendingOtp['phone_number'] ?? $pendingOtp['account_identifier'] ?? null;
+
         return view('Auth.otp', [
             'intentLabel' => $this->intentLabel($pendingOtp['intent']),
             'accountIdentifier' => $pendingOtp['account_identifier'],
             'expiresInMinutes' => self::OTP_EXPIRES_IN_MINUTES,
+            'chatLinked' => ! empty($pendingOtp['chat_id']),
+            'botLink' => $this->telegramOtpService->startLinkUrl($phoneForLink),
+            'linkCommand' => '/link '.$pendingOtp['account_identifier'],
         ]);
     }
 
@@ -183,6 +209,14 @@ class AuthController extends Controller
 
         if (! Hash::check($validated['otp'], $pendingOtp['otp_hash'])) {
             return back()->withErrors(['otp' => 'Invalid OTP code.']);
+        }
+
+        if (empty($pendingOtp['chat_id']) && ! empty($pendingOtp['phone_number'])) {
+            $linkedChatId = $this->telegramOtpService->linkedChatIdByPhone($pendingOtp['phone_number']);
+
+            if ($linkedChatId !== null) {
+                $pendingOtp['chat_id'] = $linkedChatId;
+            }
         }
 
         $request->session()->forget(self::OTP_SESSION_KEY);
@@ -221,6 +255,7 @@ class AuthController extends Controller
                 chatId: $chatId
             );
 
+            $this->telegramOtpService->clearPendingOtpForPhone($pendingOtp['phone_number'] ?? null);
             $pendingOtp['chat_id'] = $chatId;
         } catch (\Throwable $exception) {
             Log::warning('Telegram OTP resend failed.', [
@@ -278,6 +313,8 @@ class AuthController extends Controller
                 expiresInMinutes: self::OTP_EXPIRES_IN_MINUTES,
                 chatId: $chatId
             );
+
+            $this->telegramOtpService->clearPendingOtpForPhone($phoneNumber);
         } catch (\Throwable $exception) {
             Log::warning('Telegram OTP send failed.', [
                 'message' => $exception->getMessage(),
@@ -289,6 +326,33 @@ class AuthController extends Controller
             $botHint = $botLink
                 ? "Open {$botLink}, press START, or send '/link {$accountIdentifier}'."
                 : "Open your bot chat, press /start, then send '/link {$accountIdentifier}'.";
+
+            if ($phoneNumber !== null && $this->isUnlinkedTelegramChatError($exception)) {
+                $this->telegramOtpService->storePendingOtpForPhone(
+                    phoneNumber: $phoneNumber,
+                    otp: $otp,
+                    intentLabel: $this->intentLabel($intent),
+                    accountIdentifier: $accountIdentifier,
+                    expiresInMinutes: self::OTP_EXPIRES_IN_MINUTES
+                );
+
+                $request->session()->put(self::OTP_SESSION_KEY, [
+                    'intent' => $intent,
+                    'account_identifier' => $accountIdentifier,
+                    'phone_number' => $phoneNumber,
+                    'chat_id' => null,
+                    'payload' => $payload,
+                    'otp_hash' => Hash::make($otp),
+                    'expires_at' => now()->addMinutes(self::OTP_EXPIRES_IN_MINUTES)->toIso8601String(),
+                ]);
+
+                return redirect()
+                    ->route('otp.form')
+                    ->with('status', 'Telegram is not linked yet. After linking your bot chat, OTP will be sent automatically.')
+                    ->withErrors([
+                        'otp' => "Link required. {$botHint}",
+                    ]);
+            }
 
             return back()
                 ->withErrors([
@@ -446,5 +510,13 @@ class AuthController extends Controller
             'staff' => 'dashboard.staff',
             default => 'dashboard.user',
         };
+    }
+
+    private function isUnlinkedTelegramChatError(\Throwable $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'telegram')
+            && str_contains($message, 'not linked');
     }
 }
